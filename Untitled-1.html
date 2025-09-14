@@ -1,0 +1,179 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Labyrinthe interactif avec build et parcours</title>
+  <style>
+    body { background:#222; color:white; text-align:center; font-family:sans-serif; }
+    canvas { image-rendering: pixelated; margin:20px auto; display:block; border:2px solid #555; cursor:pointer; }
+    #toolbar { margin:10px; }
+    button { padding:6px 12px; margin:5px; border-radius:6px; border:none; cursor:pointer; }
+  </style>
+</head>
+<body>
+  <h2>Labyrinthe interactif</h2>
+  <div id="toolbar">
+    <button id="toggleMode">Mode Build</button>
+    <span id="info">Clique sur les murs pour les modifier.</span>
+  </div>
+  <canvas id="maze"></canvas>
+
+<script>
+let rows = `
+##################################################
+      #         #             #                 ##
+##### ##### ### ######### ### ### ######### ### ##
+#   #       # #           # #   #   #     # # # ##
+# # ######### ############# ### ### ### ### # # ##
+# #   #           #   #       # # #     #   #   ##
+# ### # ##### ### # # # # ##### # ### ### ##### ##
+# # #   #     #     # # #       #     #   #   # ##
+# # ##### ### ####### # ######### ##### ### # # ##
+#     #   #   #   #   #     #         #     # # ##
+# ##### # ##### # ######### ####### ######### ####
+# #     # #     #   #     #     #   #       #   ##
+# # ####### ####### # ### ##### ##### ##### ### ##
+# #         #     #   #       #   #   # #   #   ##
+# ############# # ##### ######### # ### # ### # ##
+#     #         #     #   #   #   #   # # #   # ##
+##### # ############# ### # # # ### # # # ### # ##
+#   #   #       #   #   #   # #   # # #   #   # ##
+# # ##### ##### # # ### ##### ### # # # ### ### ##
+# #   # #   #   # #   # #   #   # # # # #   # # ##
+# # # # # # ##### # ### # # ### # ### # # ### # ##
+# # #   # #       #     # # #   #   # # # # #   ##
+# # # ### ############### # # # ### # # # # # ####
+# # # #   #           #   #   #   #   #   # #   ##
+### # # ####### ### ### ################### ### ##
+#   # # #     #   #   #               #     #   ##
+# ### # # ### ### ### ########### ##### # ### ####
+#   # #   # # # #   #           #       # #   # ##
+# # ####### # # ### ### ####### ######### # ### ##
+# #           #       #   #   #   #   #   #     ##
+# ####################### # # ### ### # ####### ##
+#                         # #         #         ##
+################################################  
+##################################################
+`.trim().split("\n").map(r=>r.split(""));
+
+const h = rows.length;
+const w = rows[0].length;
+const scale = 12;
+const canvas = document.getElementById("maze");
+canvas.width = w*scale;
+canvas.height = h*scale;
+const ctx = canvas.getContext("2d");
+
+let editMode = true; // true = build, false = parcours
+let start=null, end=null, path=[], distMap=null, maxDist=0;
+
+function computeDistances(s){
+  const dist=Array.from({length:h},()=>Array(w).fill(-1));
+  const q=[s];
+  dist[s[1]][s[0]]=0;
+  const dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+  while(q.length){
+    const [x,y]=q.shift();
+    for(const [dx,dy] of dirs){
+      const nx=x+dx, ny=y+dy;
+      if(nx>=0 && nx<w && ny>=0 && ny<h && rows[ny][nx]===' ' && dist[ny][nx]===-1){
+        dist[ny][nx]=dist[y][x]+1;
+        q.push([nx,ny]);
+      }
+    }
+  }
+  let m=0; for(let y=0;y<h;y++) for(let x=0;x<w;x++) if(dist[y][x]>m) m=dist[y][x];
+  return {dist,max:m};
+}
+
+function bfs(start,end){
+  const dist=Array.from({length:h},()=>Array(w).fill(-1));
+  const prev=Array.from({length:h},()=>Array(w).fill(null));
+  const q=[start];
+  dist[start[1]][start[0]]=0;
+  const dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+  while(q.length){
+    const [x,y]=q.shift();
+    if(x===end[0] && y===end[1]) break;
+    for(const [dx,dy] of dirs){
+      const nx=x+dx, ny=y+dy;
+      if(nx>=0 && nx<w && ny>=0 && ny<h && rows[ny][nx]===' ' && dist[ny][nx]===-1){
+        dist[ny][nx]=dist[y][x]+1;
+        prev[ny][nx]=[x,y];
+        q.push([nx,ny]);
+      }
+    }
+  }
+  if(dist[end[1]][end[0]]===-1) return [];
+  const p=[]; let cur=end;
+  while(cur){ p.push(cur); cur=prev[cur[1]][cur[0]]; }
+  return p.reverse();
+}
+
+function draw(){
+  for(let y=0;y<h;y++){
+    for(let x=0;x<w;x++){
+      if(rows[y][x]==='#') ctx.fillStyle="#000";
+      else if(!editMode && start && !end && distMap && distMap[y][x]>=0){
+        const t=distMap[y][x]/maxDist;
+        const r=Math.floor(255*t);
+        const g=Math.floor(255*(1-t));
+        ctx.fillStyle=`rgb(${r},${g},50)`;
+      } else ctx.fillStyle="#fff";
+      ctx.fillRect(x*scale,y*scale,scale,scale);
+    }
+  }
+  ctx.fillStyle="lime";
+  for(const [x,y] of path) ctx.fillRect(x*scale,y*scale,scale,scale);
+  if(start) ctx.fillStyle="blue", ctx.fillRect(start[0]*scale,start[1]*scale,scale,scale);
+  if(end) ctx.fillStyle="red", ctx.fillRect(end[0]*scale,end[1]*scale,scale,scale);
+}
+
+canvas.addEventListener("click", e=>{
+  const rect=canvas.getBoundingClientRect();
+  const x=Math.floor((e.clientX-rect.left)/scale);
+  const y=Math.floor((e.clientY-rect.top)/scale);
+
+  if(editMode){
+    rows[y][x] = rows[y][x]==='#'?' ':'#';
+    start=null; end=null; path=[]; distMap=null; maxDist=0;
+    document.getElementById("info").innerHTML="Mur modifié. Clique sur une case libre pour définir entrée/sortie.";
+  } else {
+    if(rows[y][x]==='#') return;
+    if(!start){
+      start=[x,y]; end=null; path=[];
+      const res=computeDistances(start);
+      distMap=res.dist; maxDist=res.max;
+      document.getElementById("info").innerHTML="Entrée définie (bleu). Clique une autre case libre pour la sortie.";
+    } else if(!end){
+      end=[x,y];
+      path=bfs(start,end);
+      document.getElementById("info").innerHTML = path.length ? "Chemin trouvé ! Longueur: "+path.length : "Pas de chemin possible.";
+    } else {
+      start=[x,y]; end=null; path=[];
+      const res=computeDistances(start);
+      distMap=res.dist; maxDist=res.max;
+      document.getElementById("info").innerHTML="Nouvelle entrée définie. Clique pour définir sortie.";
+    }
+  }
+  draw();
+});
+
+// --- Bouton bascule ---
+document.getElementById("toggleMode").addEventListener("click",()=>{
+  editMode=!editMode;
+  if(editMode){
+    document.getElementById("toggleMode").innerText="Mode Build";
+    document.getElementById("info").innerHTML="Clique sur les murs pour les modifier.";
+    start=null; end=null; path=[]; distMap=null; maxDist=0;
+  } else {
+    document.getElementById("toggleMode").innerText="Mode Parcours";
+    document.getElementById("info").innerHTML="Clique une case libre pour définir l'entrée.";
+  }
+  draw();
+});
+
+draw();
+</script>
+</body>
+</html>
